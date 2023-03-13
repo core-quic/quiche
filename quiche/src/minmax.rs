@@ -53,7 +53,7 @@
 // holds for 2nd & 3rd best.
 
 use std::time::Duration;
-use std::time::Instant;
+use unix_time::Instant;
 
 #[derive(Copy, Clone)]
 struct MinmaxSample<T> {

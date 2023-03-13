@@ -25,7 +25,7 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::time::Duration;
-use std::time::Instant;
+use unix_time::Instant;
 
 // When autotuning the receiver window, decide how much
 // we increase the window.

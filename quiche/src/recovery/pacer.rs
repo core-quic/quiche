@@ -39,7 +39,7 @@
 //! still try to provide close timestamp if the send burst is implemented.
 
 use std::time::Duration;
-use std::time::Instant;
+use unix_time::Instant;
 
 #[derive(Debug)]
 pub struct Pacer {

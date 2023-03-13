@@ -28,7 +28,6 @@ use std::fmt::Display;
 use std::ops::Index;
 use std::ops::IndexMut;
 use std::ops::RangeInclusive;
-use std::time;
 
 use ring::aead;
 
@@ -862,7 +861,7 @@ fn compute_retry_integrity_tag(
 pub struct PktNumSpace {
     pub largest_rx_pkt_num: u64,
 
-    pub largest_rx_pkt_time: time::Instant,
+    pub largest_rx_pkt_time: unix_time::Instant,
 
     pub largest_rx_non_probing_pkt_num: u64,
 
@@ -888,7 +887,7 @@ impl PktNumSpace {
         PktNumSpace {
             largest_rx_pkt_num: 0,
 
-            largest_rx_pkt_time: time::Instant::now(),
+            largest_rx_pkt_time: unix_time::Instant::now(),
 
             largest_rx_non_probing_pkt_num: 0,
 

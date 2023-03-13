@@ -135,7 +135,7 @@ pub struct Path {
 
     /// Pending challenge data with the size of the packet containing them and
     /// when they were sent.
-    in_flight_challenges: VecDeque<([u8; 8], usize, time::Instant)>,
+    in_flight_challenges: VecDeque<([u8; 8], usize, unix_time::Instant)>,
 
     /// The maximum challenge size that got acknowledged.
     max_challenge_size: usize,
@@ -144,7 +144,7 @@ pub struct Path {
     probing_lost: usize,
 
     /// Last instant when a probing packet got lost.
-    last_probe_lost_time: Option<time::Instant>,
+    last_probe_lost_time: Option<unix_time::Instant>,
 
     /// Received challenge data.
     received_challenges: VecDeque<[u8; 8]>,
@@ -205,6 +205,8 @@ impl Path {
             (PathState::Unknown, None, None)
         };
 
+        let recovery = recovery::Recovery::new_with_config(recovery_config);
+
         Self {
             local_addr,
             peer_addr,
@@ -212,7 +214,7 @@ impl Path {
             active_dcid_seq,
             state,
             active: false,
-            recovery: recovery::Recovery::new_with_config(recovery_config),
+            recovery,
             in_flight_challenges: VecDeque::new(),
             max_challenge_size: 0,
             probing_lost: 0,
@@ -324,7 +326,7 @@ impl Path {
 
     /// Handles the sending of PATH_CHALLENGE.
     pub fn add_challenge_sent(
-        &mut self, data: [u8; 8], pkt_size: usize, sent_time: time::Instant,
+        &mut self, data: [u8; 8], pkt_size: usize, sent_time: unix_time::Instant,
     ) {
         self.on_challenge_sent();
         self.in_flight_challenges
@@ -386,7 +388,7 @@ impl Path {
     }
 
     pub fn on_loss_detection_timeout(
-        &mut self, handshake_status: HandshakeStatus, now: time::Instant,
+        &mut self, handshake_status: HandshakeStatus, now: unix_time::Instant,
         is_server: bool, trace_id: &str,
     ) -> (usize, usize) {
         let (lost_packets, lost_bytes) = self.recovery.on_loss_detection_timeout(
@@ -934,7 +936,7 @@ mod tests {
         path_mgr.get_mut(pid).unwrap().add_challenge_sent(
             data,
             MIN_CLIENT_INITIAL_LEN - 1,
-            time::Instant::now(),
+            unix_time::Instant::now(),
         );
 
         assert_eq!(path_mgr.get_mut(pid).unwrap().validation_requested(), false);
@@ -964,7 +966,7 @@ mod tests {
         path_mgr.get_mut(pid).unwrap().add_challenge_sent(
             data,
             MIN_CLIENT_INITIAL_LEN,
-            time::Instant::now(),
+            unix_time::Instant::now(),
         );
 
         path_mgr.on_response_received(data).unwrap();
@@ -1006,7 +1008,7 @@ mod tests {
             .add_challenge_sent(
                 data,
                 MIN_CLIENT_INITIAL_LEN,
-                time::Instant::now(),
+                unix_time::Instant::now(),
             );
 
         // Second probe.
@@ -1018,7 +1020,7 @@ mod tests {
             .add_challenge_sent(
                 data_2,
                 MIN_CLIENT_INITIAL_LEN,
-                time::Instant::now(),
+                unix_time::Instant::now(),
             );
         assert_eq!(
             client_path_mgr

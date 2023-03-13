@@ -28,7 +28,7 @@ use super::*;
 use crate::recovery::Recovery;
 
 use std::time::Duration;
-use std::time::Instant;
+use unix_time::Instant;
 
 // BBR Functions at Initialization.
 //

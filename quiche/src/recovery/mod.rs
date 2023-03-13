@@ -29,7 +29,7 @@ use std::cmp;
 use std::str::FromStr;
 
 use std::time::Duration;
-use std::time::Instant;
+use unix_time::Instant;
 
 use std::collections::VecDeque;
 
@@ -41,6 +41,11 @@ use crate::minmax;
 use crate::packet;
 use crate::ranges;
 
+use pluginop::api::ToPluginizableConnection;
+use pluginop::common::PluginOp;
+use pluginop::pluginop_macro::pluginop;
+use pluginop::ParentReferencer;
+use pluginop::PluginizableConnection;
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
 
@@ -77,6 +82,9 @@ const PACING_MULTIPLIER: f64 = 1.25;
 pub(super) const MAX_OUTSTANDING_NON_ACK_ELICITING: usize = 24;
 
 pub struct Recovery {
+    /// The pluginized connection.
+    pc: Option<ParentReferencer<PluginizableConnection<crate::Connection>>>,
+
     loss_detection_timer: Option<Instant>,
 
     pto_count: u32,
@@ -196,6 +204,8 @@ impl Recovery {
             recovery_config.max_send_udp_payload_size * INITIAL_WINDOW_PACKETS;
 
         Recovery {
+            pc: None,
+
             loss_detection_timer: None,
 
             pto_count: 0,
@@ -721,6 +731,7 @@ impl Recovery {
         self.max_datagram_size = max_datagram_size;
     }
 
+    #[pluginop(PluginOp::UpdateRtt)]
     fn update_rtt(
         &mut self, latest_rtt: Duration, ack_delay: Duration, now: Instant,
     ) {
@@ -1046,6 +1057,20 @@ impl Recovery {
 
     pub fn send_quantum(&self) -> usize {
         self.send_quantum
+    }
+}
+
+impl ToPluginizableConnection<crate::Connection> for Recovery {
+    fn set_pluginizable_connection(
+        &mut self, pc: *mut PluginizableConnection<crate::Connection>,
+    ) {
+        self.pc = Some(ParentReferencer::new(pc));
+    }
+
+    fn get_pluginizable_connection(
+        &mut self,
+    ) -> Option<&mut PluginizableConnection<crate::Connection>> {
+        self.pc.as_deref_mut()
     }
 }
 

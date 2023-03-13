@@ -29,7 +29,7 @@
 //! Note that Slow Start can use HyStart++ when enabled.
 
 use std::cmp;
-use std::time::Instant;
+use unix_time::Instant;
 
 use crate::packet;
 use crate::recovery;
@@ -210,8 +210,8 @@ mod tests {
             ack_eliciting: true,
             in_flight: true,
             delivered: 0,
-            delivered_time: std::time::Instant::now(),
-            first_sent_time: std::time::Instant::now(),
+            delivered_time: unix_time::Instant::now(),
+            first_sent_time: unix_time::Instant::now(),
             is_app_limited: false,
             has_data: false,
         };
@@ -259,8 +259,8 @@ mod tests {
             ack_eliciting: true,
             in_flight: true,
             delivered: 0,
-            delivered_time: std::time::Instant::now(),
-            first_sent_time: std::time::Instant::now(),
+            delivered_time: unix_time::Instant::now(),
+            first_sent_time: unix_time::Instant::now(),
             is_app_limited: false,
             has_data: false,
         };

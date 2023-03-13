@@ -382,6 +382,13 @@
 #[macro_use]
 extern crate log;
 
+use pluginop::api::CTPError;
+use pluginop::api::ToPluginizableConnection;
+use pluginop::common::quic::ConnectionField;
+use pluginop::common::quic::RecoveryField;
+use pluginop::common::PluginVal;
+use pluginop::ParentReferencer;
+use pluginop::PluginizableConnection;
 #[cfg(feature = "qlog")]
 use qlog::events::connectivity::TransportOwner;
 #[cfg(feature = "qlog")]
@@ -643,7 +650,7 @@ pub struct SendInfo {
     /// See [Pacing] for more details.
     ///
     /// [Pacing]: index.html#pacing
-    pub at: time::Instant,
+    pub at: unix_time::Instant,
 }
 
 /// Represents information carried by `CONNECTION_CLOSE` frames.
@@ -1201,6 +1208,9 @@ impl Config {
 
 /// A QUIC connection.
 pub struct Connection {
+    /// The pluginized connection.
+    pc: Option<ParentReferencer<PluginizableConnection<Self>>>,
+
     /// QUIC wire version used for the connection.
     version: u32,
 
@@ -1309,10 +1319,10 @@ pub struct Connection {
     blocked_limit: Option<u64>,
 
     /// Idle timeout expiration time.
-    idle_timer: Option<time::Instant>,
+    idle_timer: Option<unix_time::Instant>,
 
     /// Draining timeout expiration time.
-    draining_timer: Option<time::Instant>,
+    draining_timer: Option<unix_time::Instant>,
 
     /// List of raw packets that were received before they could be decrypted.
     undecryptable_pkts: VecDeque<(Vec<u8>, RecvInfo)>,
@@ -1695,6 +1705,8 @@ impl Connection {
         );
 
         let mut conn = Connection {
+            pc: None,
+
             version: config.version,
 
             ids,
@@ -1951,7 +1963,7 @@ impl Connection {
             Some(title),
             Some(description),
             None,
-            time::Instant::now(),
+            unix_time::Instant::now(),
             trace,
             self.qlog.level.clone(),
             writer,
@@ -2182,7 +2194,7 @@ impl Connection {
     fn recv_single(
         &mut self, buf: &mut [u8], info: &RecvInfo, recv_pid: Option<usize>,
     ) -> Result<usize> {
-        let now = time::Instant::now();
+        let now = unix_time::Instant::now();
 
         if buf.is_empty() {
             return Err(Error::Done);
@@ -3115,7 +3127,7 @@ impl Connection {
     fn send_single(
         &mut self, out: &mut [u8], send_pid: usize, has_initial: bool,
     ) -> Result<(packet::Type, usize)> {
-        let now = time::Instant::now();
+        let now = unix_time::Instant::now();
 
         if out.is_empty() {
             return Err(Error::BufferTooShort);
@@ -4333,7 +4345,7 @@ impl Connection {
                 data: None,
             });
 
-            let now = time::Instant::now();
+            let now = unix_time::Instant::now();
             q.add_event_data_with_instant(ev_data, now).ok();
         });
 
@@ -4492,7 +4504,7 @@ impl Connection {
                 data: None,
             });
 
-            let now = time::Instant::now();
+            let now = unix_time::Instant::now();
             q.add_event_data_with_instant(ev_data, now).ok();
         });
 
@@ -5287,7 +5299,7 @@ impl Connection {
     /// disarmed.
     ///
     /// [`on_timeout()`]: struct.Connection.html#method.on_timeout
-    pub fn timeout_instant(&self) -> Option<time::Instant> {
+    pub fn timeout_instant(&self) -> Option<unix_time::Instant> {
         if self.is_closed() {
             return None;
         }
@@ -5321,7 +5333,7 @@ impl Connection {
     /// [`on_timeout()`]: struct.Connection.html#method.on_timeout
     pub fn timeout(&self) -> Option<time::Duration> {
         self.timeout_instant().map(|timeout| {
-            let now = time::Instant::now();
+            let now = unix_time::Instant::now();
 
             if timeout <= now {
                 time::Duration::ZERO
@@ -5335,7 +5347,7 @@ impl Connection {
     ///
     /// If no timeout has occurred it does nothing.
     pub fn on_timeout(&mut self) {
-        let now = time::Instant::now();
+        let now = unix_time::Instant::now();
 
         if let Some(draining_timer) = self.draining_timer {
             if draining_timer <= now {
@@ -6380,7 +6392,7 @@ impl Connection {
     /// Processes an incoming frame.
     fn process_frame(
         &mut self, frame: frame::Frame, hdr: &packet::Header,
-        recv_path_id: usize, epoch: packet::Epoch, now: time::Instant,
+        recv_path_id: usize, epoch: packet::Epoch, now: unix_time::Instant,
     ) -> Result<()> {
         trace!("{} rx frm {:?}", self.trace_id, frame);
 
@@ -6839,7 +6851,9 @@ impl Connection {
     }
 
     /// Drops the keys and recovery state for the given epoch.
-    fn drop_epoch_state(&mut self, epoch: packet::Epoch, now: time::Instant) {
+    fn drop_epoch_state(
+        &mut self, epoch: packet::Epoch, now: unix_time::Instant,
+    ) {
         if self.pkt_num_spaces[epoch].crypto_open.is_none() {
             return;
         }
@@ -7063,6 +7077,10 @@ impl Connection {
         let mut path =
             path::Path::new(info.to, info.from, &self.recovery_config, false);
 
+        if let Some(pc) = self.pc.as_mut() {
+            path.recovery.set_pluginizable_connection(&mut **pc);
+        }
+
         path.max_send_bytes = buf_len * MAX_AMPLIFICATION_FACTOR;
         path.active_scid_seq = Some(in_scid_seq);
 
@@ -7143,6 +7161,9 @@ impl Connection {
         let mut path =
             path::Path::new(local_addr, peer_addr, &self.recovery_config, false);
         path.active_dcid_seq = Some(dcid_seq);
+        if let Some(pc) = self.pc.as_mut() {
+            path.recovery.set_pluginizable_connection(&mut **pc);
+        }
 
         let pid = self
             .paths
@@ -7187,6 +7208,59 @@ fn drop_pkt_on_err(
     // Ignore other invalid packets that haven't been authenticated to prevent
     // man-in-the-middle and man-on-the-side attacks.
     Error::Done
+}
+
+impl pluginop::api::ConnectionToPlugin for Connection {
+    fn get_recovery(
+        &self, _: &mut [u8], _: RecoveryField,
+    ) -> bincode::Result<()> {
+        todo!("find the right recovery")
+    }
+
+    fn set_recovery(&mut self, _: RecoveryField, _: &[u8]) {
+        todo!("find the right recovery")
+    }
+
+    fn get_connection(
+        &self, field: ConnectionField, w: &mut [u8],
+    ) -> bincode::Result<()> {
+        let pv: PluginVal = match field {
+            ConnectionField::MaxTxData => self.max_tx_data.into(),
+            _ => todo!(),
+        };
+        bincode::serialize_into(w, &pv)
+    }
+
+    fn set_connection(
+        &mut self, field: ConnectionField, r: &[u8],
+    ) -> std::result::Result<(), CTPError> {
+        let pv: PluginVal =
+            bincode::deserialize_from(r).map_err(|_| CTPError::SerializeError)?;
+        match field {
+            ConnectionField::MaxTxData =>
+                self.max_tx_data = pv.try_into().map_err(|_| CTPError::BadType)?,
+            _ => todo!(),
+        };
+        Ok(())
+    }
+}
+
+impl ToPluginizableConnection<Connection> for Connection {
+    fn set_pluginizable_connection(
+        &mut self, pc: *mut PluginizableConnection<Self>,
+    ) {
+        self.pc = Some(ParentReferencer::new(pc));
+
+        for (_, p) in self.paths.iter_mut() {
+            p.recovery.set_pluginizable_connection(pc);
+        }
+    }
+
+    fn get_pluginizable_connection(
+        &mut self,
+    ) -> Option<&mut PluginizableConnection<Self>> {
+        self.pc.as_deref_mut()
+    }
 }
 
 struct AddrTupleFmt(SocketAddr, SocketAddr);
@@ -14324,7 +14398,7 @@ mod tests {
             .recovery
             .loss_detection_timer()
             .unwrap();
-        let timer = probe_instant.duration_since(time::Instant::now());
+        let timer = probe_instant.duration_since(unix_time::Instant::now());
         std::thread::sleep(timer + time::Duration::from_millis(1));
 
         pipe.client.on_timeout();
@@ -14390,7 +14464,7 @@ mod tests {
                 .recovery
                 .loss_detection_timer()
                 .unwrap();
-            let timer = probe_instant.duration_since(time::Instant::now());
+            let timer = probe_instant.duration_since(unix_time::Instant::now());
             std::thread::sleep(timer + time::Duration::from_millis(1));
 
             pipe.client.on_timeout();
@@ -15159,7 +15233,7 @@ mod tests {
             .recovery
             .loss_detection_timer()
             .unwrap();
-        let timer = probe_instant.duration_since(time::Instant::now());
+        let timer = probe_instant.duration_since(unix_time::Instant::now());
         std::thread::sleep(timer + time::Duration::from_millis(1));
 
         pipe.server.on_timeout();

@@ -30,7 +30,7 @@
 //! <https://tools.ietf.org/html/draft-cheng-iccrg-delivery-rate-estimation-01>
 
 use std::time::Duration;
-use std::time::Instant;
+use unix_time::Instant;
 
 use crate::recovery::Acked;
 use crate::recovery::Sent;
