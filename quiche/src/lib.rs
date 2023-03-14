@@ -382,11 +382,9 @@
 #[macro_use]
 extern crate log;
 
-use pluginop::api::CTPError;
 use pluginop::api::ToPluginizableConnection;
-use pluginop::common::quic::ConnectionField;
-use pluginop::common::quic::RecoveryField;
-use pluginop::common::PluginVal;
+use pluginop::common::PluginOp;
+use pluginop::pluginop_macro::pluginop_result_param;
 use pluginop::ParentReferencer;
 use pluginop::PluginizableConnection;
 #[cfg(feature = "qlog")]
@@ -6390,8 +6388,9 @@ impl Connection {
     }
 
     /// Processes an incoming frame.
-    fn process_frame(
-        &mut self, frame: frame::Frame, hdr: &packet::Header,
+    #[pluginop_result_param(po = "PluginOp::ProcessFrame", param = "ty")]
+    fn process_frame_internal(
+        &mut self, ty: u64, frame: frame::Frame, hdr: &packet::Header,
         recv_path_id: usize, epoch: packet::Epoch, now: unix_time::Instant,
     ) -> Result<()> {
         trace!("{} rx frm {:?}", self.trace_id, frame);
@@ -6850,6 +6849,20 @@ impl Connection {
         Ok(())
     }
 
+    fn process_frame(
+        &mut self, frame: frame::Frame, hdr: &packet::Header,
+        recv_path_id: usize, epoch: packet::Epoch, now: unix_time::Instant,
+    ) -> Result<()> {
+        self.process_frame_internal(
+            frame.ty(),
+            frame,
+            hdr,
+            recv_path_id,
+            epoch,
+            now,
+        )
+    }
+
     /// Drops the keys and recovery state for the given epoch.
     fn drop_epoch_state(
         &mut self, epoch: packet::Epoch, now: unix_time::Instant,
@@ -7208,59 +7221,6 @@ fn drop_pkt_on_err(
     // Ignore other invalid packets that haven't been authenticated to prevent
     // man-in-the-middle and man-on-the-side attacks.
     Error::Done
-}
-
-impl pluginop::api::ConnectionToPlugin for Connection {
-    fn get_recovery(
-        &self, _: &mut [u8], _: RecoveryField,
-    ) -> bincode::Result<()> {
-        todo!("find the right recovery")
-    }
-
-    fn set_recovery(&mut self, _: RecoveryField, _: &[u8]) {
-        todo!("find the right recovery")
-    }
-
-    fn get_connection(
-        &self, field: ConnectionField, w: &mut [u8],
-    ) -> bincode::Result<()> {
-        let pv: PluginVal = match field {
-            ConnectionField::MaxTxData => self.max_tx_data.into(),
-            _ => todo!(),
-        };
-        bincode::serialize_into(w, &pv)
-    }
-
-    fn set_connection(
-        &mut self, field: ConnectionField, r: &[u8],
-    ) -> std::result::Result<(), CTPError> {
-        let pv: PluginVal =
-            bincode::deserialize_from(r).map_err(|_| CTPError::SerializeError)?;
-        match field {
-            ConnectionField::MaxTxData =>
-                self.max_tx_data = pv.try_into().map_err(|_| CTPError::BadType)?,
-            _ => todo!(),
-        };
-        Ok(())
-    }
-}
-
-impl ToPluginizableConnection<Connection> for Connection {
-    fn set_pluginizable_connection(
-        &mut self, pc: *mut PluginizableConnection<Self>,
-    ) {
-        self.pc = Some(ParentReferencer::new(pc));
-
-        for (_, p) in self.paths.iter_mut() {
-            p.recovery.set_pluginizable_connection(pc);
-        }
-    }
-
-    fn get_pluginizable_connection(
-        &mut self,
-    ) -> Option<&mut PluginizableConnection<Self>> {
-        self.pc.as_deref_mut()
-    }
 }
 
 struct AddrTupleFmt(SocketAddr, SocketAddr);
@@ -15578,6 +15538,7 @@ pub mod h3;
 mod minmax;
 mod packet;
 mod path;
+mod plugin;
 mod rand;
 mod ranges;
 mod recovery;

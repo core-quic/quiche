@@ -49,9 +49,9 @@ pub const MAX_STREAM_SIZE: u64 = 1 << 62;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EcnCounts {
-    ect0_count: u64,
-    ect1_count: u64,
-    ecn_ce_count: u64,
+    pub ect0_count: u64,
+    pub ect1_count: u64,
+    pub ecn_ce_count: u64,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -993,6 +993,38 @@ impl Frame {
                 length: *length as u64,
                 raw: None,
             },
+        }
+    }
+
+    pub fn ty(&self) -> u64 {
+        match self {
+            Frame::Padding { .. } => 0x00,
+            Frame::Ping => 0x01,
+            Frame::ACK { .. } => 0x02,
+            Frame::ResetStream { .. } => 0x04,
+            Frame::StopSending { .. } => 0x05,
+            Frame::Crypto { .. } => 0x06,
+            Frame::CryptoHeader { .. } => 0x06,
+            Frame::NewToken { .. } => 0x07,
+            Frame::Stream { .. } => 0x08,
+            Frame::StreamHeader { .. } => 0x08,
+            Frame::MaxData { .. } => 0x10,
+            Frame::MaxStreamData { .. } => 0x11,
+            Frame::MaxStreamsBidi { .. } => 0x12,
+            Frame::MaxStreamsUni { .. } => 0x13,
+            Frame::DataBlocked { .. } => 0x14,
+            Frame::StreamDataBlocked { .. } => 0x15,
+            Frame::StreamsBlockedBidi { .. } => 0x16,
+            Frame::StreamsBlockedUni { .. } => 0x17,
+            Frame::NewConnectionId { .. } => 0x18,
+            Frame::RetireConnectionId { .. } => 0x19,
+            Frame::PathChallenge { .. } => 0x1a,
+            Frame::PathResponse { .. } => 0x1b,
+            Frame::ConnectionClose { .. } => 0x1c,
+            Frame::ApplicationClose { .. } => 0x1d,
+            Frame::HandshakeDone => 0x1e,
+            Frame::Datagram { .. } => 0x30,
+            Frame::DatagramHeader { .. } => 0x30,
         }
     }
 }

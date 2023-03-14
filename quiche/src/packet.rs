@@ -438,7 +438,8 @@ impl<'a> Header<'a> {
         })
     }
 
-    pub(crate) fn to_bytes(&self, out: &mut octets::OctetsMut) -> Result<()> {
+    /// Returns the packet type byte corresponding to this `Header`.
+    pub fn first_byte(&self) -> Result<u8> {
         let mut first = 0;
 
         // Encode pkt num length.
@@ -459,10 +460,7 @@ impl<'a> Header<'a> {
                 first &= !KEY_PHASE_BIT;
             }
 
-            out.put_u8(first)?;
-            out.put_bytes(&self.dcid)?;
-
-            return Ok(());
+            return Ok(first);
         }
 
         // Encode long header.
@@ -475,6 +473,19 @@ impl<'a> Header<'a> {
         };
 
         first |= FORM_BIT | FIXED_BIT | (ty << 4);
+        Ok(first)
+    }
+
+    pub(crate) fn to_bytes(&self, out: &mut octets::OctetsMut) -> Result<()> {
+        let first = self.first_byte()?;
+
+        // Encode short header.
+        if self.ty == Type::Short {
+            out.put_u8(first)?;
+            out.put_bytes(&self.dcid)?;
+
+            return Ok(());
+        }
 
         out.put_u8(first)?;
 
