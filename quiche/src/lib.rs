@@ -382,8 +382,12 @@
 #[macro_use]
 extern crate log;
 
+use octets::OctetsMut;
 use pluginop::api::ToPluginizableConnection;
+use pluginop::common::quic::FrameSendOrder;
+use pluginop::common::quic::Registration;
 use pluginop::common::PluginOp;
+use pluginop::pluginop_macro::pluginop_param;
 use pluginop::pluginop_macro::pluginop_result_param;
 use pluginop::ParentReferencer;
 use pluginop::PluginizableConnection;
@@ -2585,7 +2589,7 @@ impl Connection {
 
         // Process packet payload.
         while payload.cap() > 0 {
-            let frame = frame::Frame::from_bytes(&mut payload, hdr.ty)?;
+            let frame = self.parse_frame(&mut payload, hdr.ty)?;
 
             qlog_with_type!(QLOG_PACKET_RX, self.qlog, _q, {
                 qlog_frames.push(frame.to_qlog());
@@ -2670,6 +2674,7 @@ impl Connection {
 
         // Process acked frames. Note that several packets from several paths
         // might have been acked by the received packet.
+        let mut extension_acked: SmallVec<[frame::Frame; 1]> = SmallVec::new();
         for (_, p) in self.paths.iter_mut() {
             for acked in p.recovery.acked[epoch].drain(..) {
                 match acked {
@@ -2753,8 +2758,18 @@ impl Connection {
                         }
                     },
 
+                    frame::Frame::Extension { ty, tag } => {
+                        extension_acked.push(frame::Frame::Extension { ty, tag });
+                    },
+
                     _ => (),
                 }
+            }
+        }
+
+        for ea in extension_acked {
+            if let frame::Frame::Extension { ty, tag } = ea {
+                self.notify_frame(ty, frame::Frame::Extension { ty, tag }, false);
             }
         }
 
@@ -3122,6 +3137,39 @@ impl Connection {
         Ok((done, info))
     }
 
+    #[pluginop_param(po = "PluginOp::ShouldSendFrame", param = "ty")]
+    fn should_send_frame(
+        &mut self, ty: u64, pkt_type: packet::Type, epoch: packet::Epoch,
+        is_closing: bool, left: usize,
+    ) -> bool {
+        false
+    }
+
+    #[pluginop_result_param(po = "PluginOp::PrepareFrame", param = "ty")]
+    fn prepare_frame(
+        &mut self, ty: u64, epoch: packet::Epoch, left: usize,
+    ) -> Result<frame::Frame> {
+        Err(Error::Done)
+    }
+
+    #[pluginop_param(po = "PluginOp::WireLen", param = "ty")]
+    fn wire_len(&mut self, ty: u64, f: &frame::Frame) -> usize {
+        f.wire_len()
+    }
+
+    #[pluginop_result_param(po = "PluginOp::WriteFrame", param = "ty")]
+    fn write_frame(
+        &mut self, ty: u64, f: &frame::Frame, b: &mut OctetsMut,
+    ) -> Result<usize> {
+        f.to_bytes(b)
+    }
+
+    #[pluginop_param(po = "PluginOp::OnFrameReserved", param = "ty")]
+    fn on_frame_reserved(&mut self, ty: u64, f: &frame::Frame) {}
+
+    #[pluginop_param(po = "PluginOp::NotifyFrame", param = "ty")]
+    fn notify_frame(&mut self, ty: u64, f: frame::Frame, lost: bool) {}
+
     fn send_single(
         &mut self, out: &mut [u8], send_pid: usize, has_initial: bool,
     ) -> Result<(packet::Type, usize)> {
@@ -3135,6 +3183,11 @@ impl Connection {
             return Err(Error::Done);
         }
 
+        let registrations = self
+            .get_pluginizable_connection()
+            .map(|pc| pc.get_ph().get_registrations().to_vec())
+            .unwrap_or_default();
+
         let is_closing = self.local_error.is_some();
 
         let mut b = octets::OctetsMut::with_slice(out);
@@ -3144,14 +3197,18 @@ impl Connection {
         let max_dgram_len = self.dgram_max_writable_len();
 
         let epoch = pkt_type.to_epoch()?;
-        let pkt_space = &mut self.pkt_num_spaces[epoch];
+
+        let mut extension_lost: SmallVec<[frame::Frame; 1]> = SmallVec::new();
 
         // Process lost frames. There might be several paths having lost frames.
         for (_, p) in self.paths.iter_mut() {
             for lost in p.recovery.lost[epoch].drain(..) {
                 match lost {
                     frame::Frame::CryptoHeader { offset, length } => {
-                        pkt_space.crypto_stream.send.retransmit(offset, length);
+                        self.pkt_num_spaces[epoch]
+                            .crypto_stream
+                            .send
+                            .retransmit(offset, length);
 
                         self.stream_retrans_bytes += length as u64;
                         p.stream_retrans_bytes += length as u64;
@@ -3204,7 +3261,7 @@ impl Connection {
                     },
 
                     frame::Frame::ACK { .. } => {
-                        pkt_space.ack_elicited = true;
+                        self.pkt_num_spaces[epoch].ack_elicited = true;
                     },
 
                     frame::Frame::ResetStream {
@@ -3242,15 +3299,23 @@ impl Connection {
                         self.ids.mark_retire_dcid_seq(seq_num, true);
                     },
 
+                    frame::Frame::Extension { ty, tag } =>
+                        extension_lost.push(frame::Frame::Extension { ty, tag }),
+
                     _ => (),
                 }
+            }
+        }
+
+        for ef in extension_lost {
+            if let frame::Frame::Extension { ty, .. } = ef {
+                self.notify_frame(ty, ef, true);
             }
         }
 
         let is_app_limited = self.delivery_rate_check_if_app_limited();
         let n_paths = self.paths.len();
         let path = self.paths.get_mut(send_pid)?;
-        let flow_control = &mut self.flow_control;
         let pkt_space = &mut self.pkt_num_spaces[epoch];
 
         let mut left = b.cap();
@@ -3427,6 +3492,45 @@ impl Connection {
             // Bytes consumed by ACK frames.
             cwnd_available.saturating_sub(left_before_packing_ack_frame - left),
         );
+
+        for f in registrations
+            .iter()
+            .filter_map(|r| {
+                if let Registration::Frame(f) = r {
+                    Some(f)
+                } else {
+                    None
+                }
+            })
+            .filter(|f| f.send_order() == FrameSendOrder::AfterACK)
+        {
+            let ty = f.get_type();
+            if self.should_send_frame(ty, pkt_type, epoch, is_closing, left) {
+                println!("SHOULD SEND CUSTOM");
+                let frame = match self.prepare_frame(ty, epoch, left) {
+                    Ok(f) => f,
+                    Err(Error::Done) => continue,
+                    Err(e) => return Err(e),
+                };
+                println!("Prepared frame {:?}", f);
+                if self.wire_len(ty, &frame) <= b.cap() {
+                    println!("Has space for writing");
+                    match self.write_frame(ty, &frame, &mut b) {
+                        Ok(_) => {
+                            self.on_frame_reserved(ty, &frame);
+                            ack_eliciting |= f.ack_eliciting();
+                            in_flight |= f.count_for_in_flight();
+                            frames.push(frame);
+                        },
+                        Err(_) => continue,
+                    }
+                }
+            }
+        }
+
+        let path = self.paths.get_mut(send_pid)?;
+        let flow_control = &mut self.flow_control;
+        let pkt_space = &mut self.pkt_num_spaces[epoch];
 
         let mut challenge_data = None;
 
@@ -6844,6 +6948,8 @@ impl Connection {
             },
 
             frame::Frame::DatagramHeader { .. } => unreachable!(),
+
+            frame::Frame::Extension { .. } => unreachable!(),
         }
 
         Ok(())
@@ -6861,6 +6967,23 @@ impl Connection {
             epoch,
             now,
         )
+    }
+
+    /// Parses an incoming frame.
+    #[pluginop_result_param(po = "PluginOp::ParseFrame", param = "frame_type")]
+    fn parse_frame_internal(
+        &mut self, frame_type: u64, payload: &mut octets::Octets,
+        pkt: packet::Type,
+    ) -> Result<frame::Frame> {
+        frame::Frame::from_bytes_with_type(frame_type, payload, pkt)
+    }
+
+    fn parse_frame(
+        &mut self, payload: &mut octets::Octets, pkt: packet::Type,
+    ) -> Result<frame::Frame> {
+        let frame_type = payload.get_varint()?;
+
+        self.parse_frame_internal(frame_type, payload, pkt)
     }
 
     /// Drops the keys and recovery state for the given epoch.

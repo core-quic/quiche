@@ -177,14 +177,17 @@ pub enum Frame {
     DatagramHeader {
         length: usize,
     },
+
+    Extension {
+        ty: u64,
+        tag: u64,
+    },
 }
 
 impl Frame {
-    pub fn from_bytes(
-        b: &mut octets::Octets, pkt: packet::Type,
+    pub fn from_bytes_with_type(
+        frame_type: u64, b: &mut octets::Octets, pkt: packet::Type,
     ) -> Result<Frame> {
-        let frame_type = b.get_varint()?;
-
         let frame = match frame_type {
             0x00 => {
                 let mut len = 1;
@@ -343,6 +346,14 @@ impl Frame {
         }
 
         Ok(frame)
+    }
+
+    pub fn from_bytes(
+        b: &mut octets::Octets, pkt: packet::Type,
+    ) -> Result<Frame> {
+        let frame_type = b.get_varint()?;
+
+        Frame::from_bytes_with_type(frame_type, b, pkt)
     }
 
     pub fn to_bytes(&self, b: &mut octets::OctetsMut) -> Result<usize> {
@@ -569,6 +580,8 @@ impl Frame {
             },
 
             Frame::DatagramHeader { .. } => (),
+
+            Frame::Extension { .. } => unreachable!(),
         }
 
         Ok(before - b.cap())
@@ -784,6 +797,8 @@ impl Frame {
                 2 + // length, always encode as 2-byte varint
                 *length // data
             },
+
+            Frame::Extension { .. } => unreachable!(),
         }
     }
 
@@ -993,6 +1008,12 @@ impl Frame {
                 length: *length as u64,
                 raw: None,
             },
+
+            Frame::Extension { ty, .. } => QuicFrame::Unknown {
+                raw_frame_type: *ty,
+                raw_length: None,
+                raw: None,
+            },
         }
     }
 
@@ -1025,6 +1046,7 @@ impl Frame {
             Frame::HandshakeDone => 0x1e,
             Frame::Datagram { .. } => 0x30,
             Frame::DatagramHeader { .. } => 0x30,
+            Frame::Extension { ty, .. } => *ty,
         }
     }
 }
@@ -1192,6 +1214,9 @@ impl std::fmt::Debug for Frame {
             Frame::DatagramHeader { length } => {
                 write!(f, "DATAGRAM len={length}")?;
             },
+
+            Frame::Extension { ty, tag } =>
+                write!(f, "EXTENSION ty={ty:x} tag={tag:x}")?,
         }
 
         Ok(())
