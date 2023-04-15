@@ -91,7 +91,7 @@ impl ToPluginizableConnection<crate::Connection> for crate::Connection {
 
 impl<CTP: ConnectionToPlugin> FromWithPH<frame::Frame, CTP> for PluginVal {
     fn from_with_ph(
-        value: frame::Frame, _ph: &pluginop::handler::PluginHandler<CTP>,
+        value: frame::Frame, _ph: &mut pluginop::handler::PluginHandler<CTP>,
     ) -> Self {
         let frame = match value {
             frame::Frame::Padding { len } =>
@@ -419,7 +419,7 @@ impl<CTP: ConnectionToPlugin> TryFromWithPH<PluginVal, CTP> for frame::Frame {
 
 impl<CTP: ConnectionToPlugin> FromWithPH<packet::Header<'_>, CTP> for PluginVal {
     fn from_with_ph(
-        h: packet::Header<'_>, _ph: &pluginop::handler::PluginHandler<CTP>,
+        h: packet::Header<'_>, _ph: &mut pluginop::handler::PluginHandler<CTP>,
     ) -> Self {
         // FIXME
         let dcid = Bytes {
@@ -483,7 +483,7 @@ impl<CTP: ConnectionToPlugin> FromWithPH<packet::Header<'_>, CTP> for PluginVal 
 
 impl<CTP: ConnectionToPlugin> FromWithPH<packet::Epoch, CTP> for PluginVal {
     fn from_with_ph(
-        value: packet::Epoch, _: &pluginop::handler::PluginHandler<CTP>,
+        value: packet::Epoch, _: &mut pluginop::handler::PluginHandler<CTP>,
     ) -> Self {
         let pns = match value {
             packet::Epoch::Initial => quic::KPacketNumberSpace::Initial,
@@ -510,7 +510,7 @@ impl From<i64> for crate::Error {
 
 impl<CTP: ConnectionToPlugin> FromWithPH<packet::Type, CTP> for PluginVal {
     fn from_with_ph(
-        value: packet::Type, _: &pluginop::handler::PluginHandler<CTP>,
+        value: packet::Type, _: &mut pluginop::handler::PluginHandler<CTP>,
     ) -> Self {
         let pkt_type = match value {
             crate::Type::Initial => quic::PacketType::Initial,
