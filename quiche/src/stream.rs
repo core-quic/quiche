@@ -1019,7 +1019,7 @@ impl RecvBuf {
     }
 
     /// Commits the new max_data limit.
-    pub fn update_max_data(&mut self, now: unix_time::Instant) {
+    pub fn update_max_data(&mut self, now: time::Instant) {
         self.flow_control.update_max_data(now);
     }
 
@@ -1039,9 +1039,7 @@ impl RecvBuf {
     }
 
     /// Autotune the window size.
-    pub fn autotune_window(
-        &mut self, now: unix_time::Instant, rtt: time::Duration,
-    ) {
+    pub fn autotune_window(&mut self, now: time::Instant, rtt: time::Duration) {
         self.flow_control.autotune_window(now, rtt);
     }
 
@@ -2520,7 +2518,7 @@ mod tests {
 
         assert!(stream.recv.almost_full());
 
-        stream.recv.update_max_data(unix_time::Instant::now());
+        stream.recv.update_max_data(time::Instant::now());
         assert_eq!(stream.recv.max_data_next(), 25);
         assert!(!stream.recv.almost_full());
 

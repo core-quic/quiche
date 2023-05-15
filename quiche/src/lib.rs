@@ -569,6 +569,9 @@ pub enum Error {
 
     /// Not enough available identifiers.
     OutOfIdentifiers,
+
+    /// Available for the plugins to suspend the sending process.
+    SuspendSendingProcess,
 }
 
 impl Error {
@@ -606,6 +609,7 @@ impl Error {
             Error::StreamReset { .. } => -16,
             Error::IdLimit => -17,
             Error::OutOfIdentifiers => -18,
+            Error::SuspendSendingProcess => -1000,
         }
     }
 }
@@ -652,7 +656,7 @@ pub struct SendInfo {
     /// See [Pacing] for more details.
     ///
     /// [Pacing]: index.html#pacing
-    pub at: unix_time::Instant,
+    pub at: time::Instant,
 }
 
 /// Represents information carried by `CONNECTION_CLOSE` frames.
@@ -1321,10 +1325,10 @@ pub struct Connection {
     blocked_limit: Option<u64>,
 
     /// Idle timeout expiration time.
-    idle_timer: Option<unix_time::Instant>,
+    idle_timer: Option<time::Instant>,
 
     /// Draining timeout expiration time.
-    draining_timer: Option<unix_time::Instant>,
+    draining_timer: Option<time::Instant>,
 
     /// List of raw packets that were received before they could be decrypted.
     undecryptable_pkts: VecDeque<(Vec<u8>, RecvInfo)>,
@@ -1965,7 +1969,7 @@ impl Connection {
             Some(title),
             Some(description),
             None,
-            unix_time::Instant::now(),
+            time::Instant::now(),
             trace,
             self.qlog.level.clone(),
             writer,
@@ -2196,7 +2200,7 @@ impl Connection {
     fn recv_single(
         &mut self, buf: &mut [u8], info: &RecvInfo, recv_pid: Option<usize>,
     ) -> Result<usize> {
-        let now = unix_time::Instant::now();
+        let now = time::Instant::now();
 
         if buf.is_empty() {
             return Err(Error::Done);
@@ -3140,7 +3144,7 @@ impl Connection {
     #[pluginop_param(po = "PluginOp::ShouldSendFrame", param = "ty")]
     fn should_send_frame(
         &mut self, ty: u64, pkt_type: packet::Type, epoch: packet::Epoch,
-        is_closing: bool, left: usize,
+        is_closing: bool, left: usize, now: time::Instant,
     ) -> bool {
         false
     }
@@ -3173,7 +3177,7 @@ impl Connection {
     fn send_single(
         &mut self, out: &mut [u8], send_pid: usize, has_initial: bool,
     ) -> Result<(packet::Type, usize)> {
-        let now = unix_time::Instant::now();
+        let now = time::Instant::now();
 
         if out.is_empty() {
             return Err(Error::BufferTooShort);
@@ -3505,21 +3509,21 @@ impl Connection {
             .filter(|f| f.send_order() == FrameSendOrder::AfterACK)
         {
             let ty = f.get_type();
-            if self.should_send_frame(ty, pkt_type, epoch, is_closing, left) {
-                println!("SHOULD SEND CUSTOM");
+            if self.should_send_frame(ty, pkt_type, epoch, is_closing, left, now)
+            {
                 let frame = match self.prepare_frame(ty, epoch, left) {
                     Ok(f) => f,
                     Err(Error::Done) => continue,
+                    Err(Error::SuspendSendingProcess) => return Err(Error::Done),
                     Err(e) => return Err(e),
                 };
-                println!("Prepared frame {:?}", f);
                 if self.wire_len(ty, &frame) <= b.cap() {
-                    println!("Has space for writing");
                     match self.write_frame(ty, &frame, &mut b) {
-                        Ok(_) => {
+                        Ok(w) => {
                             self.on_frame_reserved(ty, &frame);
                             ack_eliciting |= f.ack_eliciting();
                             in_flight |= f.count_for_in_flight();
+                            left -= w;
                             frames.push(frame);
                         },
                         Err(_) => continue,
@@ -4083,8 +4087,46 @@ impl Connection {
             }
         }
 
+        for f in registrations
+            .iter()
+            .filter_map(|r| {
+                if let Registration::Frame(f) = r {
+                    Some(f)
+                } else {
+                    None
+                }
+            })
+            .filter(|f| f.send_order() == FrameSendOrder::End)
+        {
+            let ty = f.get_type();
+            if self.should_send_frame(ty, pkt_type, epoch, is_closing, left, now)
+            {
+                let frame = match self.prepare_frame(ty, epoch, left) {
+                    Ok(f) => f,
+                    Err(Error::Done) => continue,
+                    Err(e) => return Err(e),
+                };
+                if self.wire_len(ty, &frame) <= b.cap() {
+                    match self.write_frame(ty, &frame, &mut b) {
+                        Ok(w) => {
+                            self.on_frame_reserved(ty, &frame);
+                            ack_eliciting |= f.ack_eliciting();
+                            in_flight |= f.count_for_in_flight();
+                            left -= w;
+                            frames.push(frame);
+                        },
+                        Err(_) => continue,
+                    }
+                }
+            }
+        }
+
         // Alternate trying to send DATAGRAMs next time.
         self.emit_dgram = !dgram_emitted;
+
+        // Rust's borrowing rules.
+        let path = self.paths.get_mut(send_pid)?;
+        let pkt_space = &mut self.pkt_num_spaces[epoch];
 
         // If no other ack-eliciting frame is sent, include a PING frame
         // - if PTO probe needed; OR
@@ -4447,7 +4489,7 @@ impl Connection {
                 data: None,
             });
 
-            let now = unix_time::Instant::now();
+            let now = time::Instant::now();
             q.add_event_data_with_instant(ev_data, now).ok();
         });
 
@@ -4606,7 +4648,7 @@ impl Connection {
                 data: None,
             });
 
-            let now = unix_time::Instant::now();
+            let now = time::Instant::now();
             q.add_event_data_with_instant(ev_data, now).ok();
         });
 
@@ -5401,7 +5443,7 @@ impl Connection {
     /// disarmed.
     ///
     /// [`on_timeout()`]: struct.Connection.html#method.on_timeout
-    pub fn timeout_instant(&self) -> Option<unix_time::Instant> {
+    pub fn timeout_instant(&self) -> Option<time::Instant> {
         if self.is_closed() {
             return None;
         }
@@ -5435,7 +5477,7 @@ impl Connection {
     /// [`on_timeout()`]: struct.Connection.html#method.on_timeout
     pub fn timeout(&self) -> Option<time::Duration> {
         self.timeout_instant().map(|timeout| {
-            let now = unix_time::Instant::now();
+            let now = time::Instant::now();
 
             if timeout <= now {
                 time::Duration::ZERO
@@ -5449,7 +5491,7 @@ impl Connection {
     ///
     /// If no timeout has occurred it does nothing.
     pub fn on_timeout(&mut self) {
-        let now = unix_time::Instant::now();
+        let now = time::Instant::now();
 
         if let Some(draining_timer) = self.draining_timer {
             if draining_timer <= now {
@@ -6495,7 +6537,7 @@ impl Connection {
     #[pluginop_result_param(po = "PluginOp::ProcessFrame", param = "ty")]
     fn process_frame_internal(
         &mut self, ty: u64, frame: frame::Frame, hdr: &packet::Header,
-        recv_path_id: usize, epoch: packet::Epoch, now: unix_time::Instant,
+        recv_path_id: usize, epoch: packet::Epoch, now: time::Instant,
     ) -> Result<()> {
         trace!("{} rx frm {:?}", self.trace_id, frame);
 
@@ -6957,7 +6999,7 @@ impl Connection {
 
     fn process_frame(
         &mut self, frame: frame::Frame, hdr: &packet::Header,
-        recv_path_id: usize, epoch: packet::Epoch, now: unix_time::Instant,
+        recv_path_id: usize, epoch: packet::Epoch, now: time::Instant,
     ) -> Result<()> {
         self.process_frame_internal(
             frame.ty(),
@@ -6987,9 +7029,7 @@ impl Connection {
     }
 
     /// Drops the keys and recovery state for the given epoch.
-    fn drop_epoch_state(
-        &mut self, epoch: packet::Epoch, now: unix_time::Instant,
-    ) {
+    fn drop_epoch_state(&mut self, epoch: packet::Epoch, now: time::Instant) {
         if self.pkt_num_spaces[epoch].crypto_open.is_none() {
             return;
         }
@@ -14481,7 +14521,7 @@ mod tests {
             .recovery
             .loss_detection_timer()
             .unwrap();
-        let timer = probe_instant.duration_since(unix_time::Instant::now());
+        let timer = probe_instant.duration_since(time::Instant::now());
         std::thread::sleep(timer + time::Duration::from_millis(1));
 
         pipe.client.on_timeout();
@@ -14547,7 +14587,7 @@ mod tests {
                 .recovery
                 .loss_detection_timer()
                 .unwrap();
-            let timer = probe_instant.duration_since(unix_time::Instant::now());
+            let timer = probe_instant.duration_since(time::Instant::now());
             std::thread::sleep(timer + time::Duration::from_millis(1));
 
             pipe.client.on_timeout();
@@ -15316,7 +15356,7 @@ mod tests {
             .recovery
             .loss_detection_timer()
             .unwrap();
-        let timer = probe_instant.duration_since(unix_time::Instant::now());
+        let timer = probe_instant.duration_since(time::Instant::now());
         std::thread::sleep(timer + time::Duration::from_millis(1));
 
         pipe.server.on_timeout();

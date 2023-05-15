@@ -34,7 +34,7 @@
 use std::cmp;
 
 use std::time::Duration;
-use unix_time::Instant;
+use std::time::Instant;
 
 use crate::packet;
 use crate::recovery;

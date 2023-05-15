@@ -34,7 +34,7 @@ use crate::packet;
 use crate::recovery::*;
 
 use std::time::Duration;
-use unix_time::Instant;
+use std::time::Instant;
 
 pub static BBR: CongestionControlOps = CongestionControlOps {
     on_init,

@@ -48,7 +48,7 @@ pub enum StreamerState {
 }
 
 pub struct QlogStreamer {
-    start_time: unix_time::Instant,
+    start_time: std::time::Instant,
     writer: Box<dyn std::io::Write + Send + Sync>,
     qlog: QlogSeq,
     state: StreamerState,
@@ -68,7 +68,7 @@ impl QlogStreamer {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         qlog_version: String, title: Option<String>, description: Option<String>,
-        summary: Option<String>, start_time: unix_time::Instant, trace: TraceSeq,
+        summary: Option<String>, start_time: std::time::Instant, trace: TraceSeq,
         log_level: EventImportance,
         writer: Box<dyn std::io::Write + Send + Sync>,
     ) -> Self {
@@ -136,7 +136,7 @@ impl QlogStreamer {
 
     /// Writes a JSON-SEQ-serialized [Event] using [std::time::Instant::now()].
     pub fn add_event_now(&mut self, event: Event) -> Result<()> {
-        let now = unix_time::Instant::now();
+        let now = std::time::Instant::now();
 
         self.add_event_with_instant(event, now)
     }
@@ -144,7 +144,7 @@ impl QlogStreamer {
     /// Writes a JSON-SEQ-serialized [Event] using the provided
     /// [std::time::Instant].
     pub fn add_event_with_instant(
-        &mut self, mut event: Event, now: unix_time::Instant,
+        &mut self, mut event: Event, now: std::time::Instant,
     ) -> Result<()> {
         if self.state != StreamerState::Ready {
             return Err(Error::InvalidState);
@@ -169,7 +169,7 @@ impl QlogStreamer {
     /// Writes a JSON-SEQ-serialized [Event] based on the provided [EventData]
     /// at time [std::time::Instant::now()].
     pub fn add_event_data_now(&mut self, event_data: EventData) -> Result<()> {
-        let now = unix_time::Instant::now();
+        let now = std::time::Instant::now();
 
         self.add_event_data_with_instant(event_data, now)
     }
@@ -177,7 +177,7 @@ impl QlogStreamer {
     /// Writes a JSON-SEQ-serialized [Event] based on the provided [EventData]
     /// and [std::time::Instant].
     pub fn add_event_data_with_instant(
-        &mut self, event_data: EventData, now: unix_time::Instant,
+        &mut self, event_data: EventData, now: std::time::Instant,
     ) -> Result<()> {
         if self.state != StreamerState::Ready {
             return Err(Error::InvalidState);
@@ -224,7 +224,7 @@ impl QlogStreamer {
         &self.writer
     }
 
-    pub fn start_time(&self) -> unix_time::Instant {
+    pub fn start_time(&self) -> std::time::Instant {
         self.start_time
     }
 }
@@ -326,7 +326,7 @@ mod tests {
             Some("title".to_string()),
             Some("description".to_string()),
             None,
-            unix_time::Instant::now(),
+            std::time::Instant::now(),
             trace,
             EventImportance::Base,
             writer,
@@ -347,7 +347,7 @@ mod tests {
         // Adding an event with an external time should work too.
         // For tests, it will resolve to 0 but we care about proving the API
         // here, not timing specifics.
-        let now = unix_time::Instant::now();
+        let now = std::time::Instant::now();
 
         assert!(matches!(s.add_event_with_instant(ev3, now), Ok(())));
 

@@ -52,6 +52,7 @@ impl pluginop::api::ConnectionToPlugin for crate::Connection {
     ) -> bincode::Result<()> {
         let pv: PluginVal = match field {
             ConnectionField::MaxTxData => self.max_tx_data.into(),
+            ConnectionField::IsEstablished => self.is_established().into(),
             _ => todo!(),
         };
         bincode::serialize_into(w, &pv)
@@ -503,8 +504,12 @@ impl<CTP: ConnectionToPlugin> FromWithPH<packet::Epoch, CTP> for PluginVal {
 
 impl From<i64> for crate::Error {
     fn from(e: i64) -> Self {
-        println!("Error value {e}");
-        todo!()
+        match e {
+            -1000 => crate::Error::SuspendSendingProcess,
+            _ => {
+                todo!("Error value {e}")
+            },
+        }
     }
 }
 

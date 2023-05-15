@@ -29,7 +29,7 @@ use std::cmp;
 use std::str::FromStr;
 
 use std::time::Duration;
-use unix_time::Instant;
+use std::time::Instant;
 
 use std::collections::VecDeque;
 
