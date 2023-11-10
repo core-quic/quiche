@@ -1,3 +1,7 @@
+# Important note
+
+To build applications atop core-quiche, you probably want to use [core-quic](https://github.com/qdeconinck/core-quic) instead.
+
 ![quiche](quiche.svg)
 
 [![crates.io](https://img.shields.io/crates/v/quiche.svg)](https://crates.io/crates/quiche)
