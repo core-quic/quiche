@@ -53,6 +53,7 @@ impl pluginop::api::ConnectionToPlugin for crate::Connection {
         let pv: PluginVal = match field {
             ConnectionField::MaxTxData => self.max_tx_data.into(),
             ConnectionField::IsEstablished => self.is_established().into(),
+            ConnectionField::IsServer => self.is_server.into(),
             _ => todo!(),
         };
         bincode::serialize_into(w, &pv)
@@ -138,7 +139,15 @@ impl<CTP: ConnectionToPlugin> FromWithPH<frame::Frame, CTP> for PluginVal {
                     ack_range_count,
                     first_ack_range,
                     ecn_counts,
-                    ack_ranges: todo!(),
+                    // TODO.
+                    ack_ranges: Bytes {
+                        /// The tag to use to retrieve the associated data.
+                        tag: 0,
+                        /// The maximum number of bytes that can be fetched.
+                        max_read_len: 0,
+                        /// The maximum number of bytes that can be written.
+                        max_write_len: 0,
+                    },
                 })
             },
 
@@ -264,13 +273,15 @@ impl<CTP: ConnectionToPlugin> FromWithPH<frame::Frame, CTP> for PluginVal {
                     sequence_number: seq_num,
                 }),
 
-            #[allow(unreachable_code)]
-            frame::Frame::PathChallenge { .. } =>
-                quic::Frame::PathChallenge(PathChallengeFrame { data: todo!() }),
+            frame::Frame::PathChallenge { data } =>
+                quic::Frame::PathChallenge(PathChallengeFrame {
+                    data: u64::from_be_bytes(data),
+                }),
 
-            #[allow(unreachable_code)]
-            frame::Frame::PathResponse { .. } =>
-                quic::Frame::PathResponse(PathResponseFrame { data: todo!() }),
+            frame::Frame::PathResponse { data } =>
+                quic::Frame::PathResponse(PathResponseFrame {
+                    data: u64::from_be_bytes(data),
+                }),
 
             #[allow(unreachable_code)]
             frame::Frame::ConnectionClose {

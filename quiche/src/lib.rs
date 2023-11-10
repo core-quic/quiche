@@ -3449,6 +3449,44 @@ impl Connection {
 
         let left_before_packing_ack_frame = left;
 
+        for f in registrations
+            .iter()
+            .filter_map(|r| {
+                if let Registration::Frame(f) = r {
+                    Some(f)
+                } else {
+                    None
+                }
+            })
+            .filter(|f| f.send_order() == FrameSendOrder::First)
+        {
+            let ty = f.get_type();
+            if self.should_send_frame(ty, pkt_type, epoch, is_closing, left, now)
+            {
+                let frame = match self.prepare_frame(ty, epoch, left) {
+                    Ok(f) => f,
+                    Err(Error::Done) => continue,
+                    Err(Error::SuspendSendingProcess) => return Err(Error::Done),
+                    Err(e) => return Err(e),
+                };
+                if self.wire_len(ty, &frame) <= b.cap() {
+                    match self.write_frame(ty, &frame, &mut b) {
+                        Ok(w) => {
+                            self.on_frame_reserved(ty, &frame);
+                            ack_eliciting |= f.ack_eliciting();
+                            in_flight |= f.count_for_in_flight();
+                            left -= w;
+                            frames.push(frame);
+                        },
+                        Err(_) => continue,
+                    }
+                }
+            }
+        }
+
+        let path = self.paths.get_mut(send_pid)?;
+        let pkt_space = &mut self.pkt_num_spaces[epoch];
+
         // Create ACK frame.
         //
         // When we need to explicitly elicit an ACK via PING later, go ahead and
