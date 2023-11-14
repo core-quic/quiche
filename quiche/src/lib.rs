@@ -383,6 +383,7 @@
 extern crate log;
 
 use octets::OctetsMut;
+use octets::OctetsMutPtr;
 use pluginop::api::ToPluginizableConnection;
 use pluginop::common::quic::FrameSendOrder;
 use pluginop::common::quic::Registration;
@@ -2008,8 +2009,12 @@ impl Connection {
         let raw_params_len = b.get_u64()? as usize;
         let raw_params_bytes = b.get_bytes(raw_params_len)?;
 
-        let peer_params =
-            TransportParams::decode(raw_params_bytes.as_ref(), self.is_server)?;
+        let is_server = self.is_server;
+        let peer_params = TransportParams::decode(
+            Some(self),
+            raw_params_bytes.as_ref(),
+            is_server,
+        )?;
 
         self.process_peer_transport_params(peer_params)?;
 
@@ -6269,11 +6274,32 @@ impl Connection {
     fn encode_transport_params(&mut self) -> Result<()> {
         let mut raw_params = [0; 128];
 
-        let raw_params = TransportParams::encode(
+        let registrations = self
+            .get_pluginizable_connection()
+            .map(|pc| pc.get_ph().get_registrations().to_vec())
+            .unwrap_or(vec![]);
+
+        let mut b = TransportParams::encode_internal(
             &self.local_transport_params,
             self.is_server,
             &mut raw_params,
         )?;
+
+        use pluginop::IntoWithPH;
+        registrations.iter().for_each(|r| {
+            if let Registration::TransportParameter(tp) = r {
+                if let Some(ph) =
+                    self.get_pluginizable_connection().map(|pc| pc.get_ph_mut())
+                {
+                    let params = &[OctetsMutPtr::from(&mut b).into_with_ph(ph)];
+                    ph.call(&PluginOp::WriteTransportParameter(*tp), params)
+                        .ok();
+                }
+            }
+        });
+
+        let len = b.off();
+        let raw_params: &[u8] = &mut raw_params[..len];
 
         self.handshake.set_quic_transport_params(raw_params)?;
 
@@ -6414,11 +6440,17 @@ impl Connection {
                 // This is potentially dangerous as the handshake hasn't been
                 // completed yet, though it's required to be able to send data
                 // in 0.5 RTT.
-                let raw_params = self.handshake.quic_transport_params();
+
+                // FIXME.
+                let raw_params = self.handshake.quic_transport_params().to_vec();
+                let is_server = self.is_server;
 
                 if !self.parsed_peer_transport_params && !raw_params.is_empty() {
-                    let peer_params =
-                        TransportParams::decode(raw_params, self.is_server)?;
+                    let peer_params = TransportParams::decode(
+                        Some(self),
+                        &raw_params,
+                        is_server,
+                    )?;
 
                     self.parse_peer_transport_params(peer_params)?;
                 }
@@ -6433,11 +6465,13 @@ impl Connection {
 
         self.alpn = self.handshake.alpn_protocol().to_vec();
 
-        let raw_params = self.handshake.quic_transport_params();
+        // FIXME.
+        let raw_params = self.handshake.quic_transport_params().to_vec();
 
         if !self.parsed_peer_transport_params && !raw_params.is_empty() {
+            let is_server = self.is_server;
             let peer_params =
-                TransportParams::decode(raw_params, self.is_server)?;
+                TransportParams::decode(Some(self), &raw_params, is_server)?;
 
             self.parse_peer_transport_params(peer_params)?;
         }
@@ -7642,7 +7676,9 @@ impl Default for TransportParams {
 }
 
 impl TransportParams {
-    fn decode(buf: &[u8], is_server: bool) -> Result<TransportParams> {
+    fn decode(
+        mut conn: Option<&mut Connection>, buf: &[u8], is_server: bool,
+    ) -> Result<TransportParams> {
         let mut params = octets::Octets::with_slice(buf);
         let mut seen_params = HashSet::new();
 
@@ -7657,6 +7693,16 @@ impl TransportParams {
             seen_params.insert(id);
 
             let mut val = params.get_bytes_with_varint_length()?;
+
+            if let Some(ph) = conn.as_mut().and_then(|c| {
+                c.get_pluginizable_connection().map(|pc| pc.get_ph_mut())
+            }) {
+                use octets::OctetsPtr;
+                use pluginop::IntoWithPH;
+                let params = &[OctetsPtr::from(&mut val).into_with_ph(ph)];
+                ph.call(&PluginOp::DecodeTransportParameter(id), params)
+                    .ok();
+            }
 
             match id {
                 0x0000 => {
@@ -7804,9 +7850,9 @@ impl TransportParams {
         Ok(())
     }
 
-    fn encode<'a>(
+    fn encode_internal<'a>(
         tp: &TransportParams, is_server: bool, out: &'a mut [u8],
-    ) -> Result<&'a mut [u8]> {
+    ) -> Result<OctetsMut<'a>> {
         let mut b = octets::OctetsMut::with_slice(out);
 
         if is_server {
@@ -7948,6 +7994,15 @@ impl TransportParams {
             )?;
             b.put_varint(max_datagram_frame_size)?;
         }
+
+        Ok(b)
+    }
+
+    #[allow(dead_code)]
+    fn encode<'a>(
+        tp: &TransportParams, is_server: bool, out: &'a mut [u8],
+    ) -> Result<&'a mut [u8]> {
+        let b = TransportParams::encode_internal(tp, is_server, out)?;
 
         let out_len = b.off();
 
@@ -8480,7 +8535,7 @@ mod tests {
             TransportParams::encode(&tp, true, &mut raw_params).unwrap();
         assert_eq!(raw_params.len(), 94);
 
-        let new_tp = TransportParams::decode(raw_params, false).unwrap();
+        let new_tp = TransportParams::decode(None, raw_params, false).unwrap();
 
         assert_eq!(new_tp, tp);
 
@@ -8510,7 +8565,7 @@ mod tests {
             TransportParams::encode(&tp, false, &mut raw_params).unwrap();
         assert_eq!(raw_params.len(), 69);
 
-        let new_tp = TransportParams::decode(raw_params, true).unwrap();
+        let new_tp = TransportParams::decode(None, raw_params, true).unwrap();
 
         assert_eq!(new_tp, tp);
     }
@@ -8528,6 +8583,7 @@ mod tests {
 
         // No error when decoding the param.
         let tp = TransportParams::decode(
+            None,
             initial_source_connection_id_raw.as_slice(),
             true,
         )
@@ -8545,7 +8601,7 @@ mod tests {
 
         // Decoding fails.
         assert_eq!(
-            TransportParams::decode(raw_params.as_slice(), true),
+            TransportParams::decode(None, raw_params.as_slice(), true),
             Err(Error::InvalidTransportParam)
         );
     }
