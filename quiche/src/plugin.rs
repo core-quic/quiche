@@ -54,7 +54,18 @@ impl pluginop::api::ConnectionToPlugin for crate::Connection {
             ConnectionField::MaxTxData => self.max_tx_data.into(),
             ConnectionField::IsEstablished => self.is_established().into(),
             ConnectionField::IsServer => self.is_server.into(),
-            _ => todo!(),
+            ConnectionField::PacketNumberSpace(e, pns_field) => {
+                let pns = &self.pkt_num_spaces[packet::Epoch::from(e)];
+                match pns_field {
+                    quic::PacketNumberSpaceField::ReceivedPacketNeedAck => (pns.recv_pkt_need_ack.len() > 0).into(),
+                    quic::PacketNumberSpaceField::AckEllicited => pns.ack_elicited.into(),
+                    quic::PacketNumberSpaceField::NextPacketNumber => todo!(),
+                    quic::PacketNumberSpaceField::HasSendKeys => todo!(),
+                    quic::PacketNumberSpaceField::ShouldSend => todo!(),
+                    quic::PacketNumberSpaceField::LargestRxPacketNumber => todo!(),
+                }
+            }
+            f => todo!("{f:?}"),
         };
         bincode::serialize_into(w, &pv)
     }
@@ -504,6 +515,16 @@ impl<CTP: ConnectionToPlugin> FromWithPH<packet::Epoch, CTP> for PluginVal {
                 quic::KPacketNumberSpace::ApplicationData,
         };
         PluginVal::QUIC(quic::QVal::PacketNumberSpace(pns))
+    }
+}
+
+impl From<quic::KPacketNumberSpace> for packet::Epoch {
+    fn from(value: quic::KPacketNumberSpace) -> Self {
+        match value {
+            quic::KPacketNumberSpace::Initial => packet::Epoch::Initial,
+            quic::KPacketNumberSpace::Handshake => packet::Epoch::Handshake,
+            quic::KPacketNumberSpace::ApplicationData => packet::Epoch::Application,
+        }
     }
 }
 

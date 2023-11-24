@@ -731,7 +731,7 @@ impl Recovery {
         self.max_datagram_size = max_datagram_size;
     }
 
-    #[pluginop(PluginOp::UpdateRtt)]
+    #[pluginop(po = "PluginOp::UpdateRtt")]
     fn update_rtt(
         &mut self, latest_rtt: Duration, ack_delay: Duration, now: Instant,
     ) {

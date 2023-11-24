@@ -388,6 +388,7 @@ use pluginop::api::ToPluginizableConnection;
 use pluginop::common::quic::FrameSendOrder;
 use pluginop::common::quic::Registration;
 use pluginop::common::PluginOp;
+use pluginop::pluginop_macro::pluginop;
 use pluginop::pluginop_macro::pluginop_param;
 use pluginop::pluginop_macro::pluginop_result_param;
 use pluginop::ParentReferencer;
@@ -3154,6 +3155,23 @@ impl Connection {
         false
     }
 
+    #[pluginop(po = "PluginOp::ShouldSendFrame", value = "2")]
+    fn should_send_ack_frame(&mut self, pkt_type: packet::Type, epoch: packet::Epoch,
+        is_closing: bool, left: usize, now: time::Instant, send_pid: usize, ack_elicit_required: bool,
+    ) -> bool {
+        // A bit bad but still...
+        let path = self.paths.get_mut(send_pid).unwrap();
+        let pkt_space = &mut self.pkt_num_spaces[epoch];
+        pkt_space.recv_pkt_need_ack.len() > 0 &&
+            (pkt_space.ack_elicited || ack_elicit_required) &&
+            (!is_closing ||
+                (pkt_type == Type::Handshake &&
+                    self.local_error
+                        .as_ref()
+                        .map_or(false, |le| le.is_app))) &&
+            path.active()
+    }
+
     #[pluginop_result_param(po = "PluginOp::PrepareFrame", param = "ty")]
     fn prepare_frame(
         &mut self, ty: u64, epoch: packet::Epoch, left: usize,
@@ -3489,24 +3507,18 @@ impl Connection {
             }
         }
 
-        let path = self.paths.get_mut(send_pid)?;
-        let pkt_space = &mut self.pkt_num_spaces[epoch];
-
         // Create ACK frame.
         //
         // When we need to explicitly elicit an ACK via PING later, go ahead and
         // generate an ACK (if there's anything to ACK) since we're going to
         // send a packet with PING anyways, even if we haven't received anything
         // ACK eliciting.
-        if pkt_space.recv_pkt_need_ack.len() > 0 &&
-            (pkt_space.ack_elicited || ack_elicit_required) &&
-            (!is_closing ||
-                (pkt_type == Type::Handshake &&
-                    self.local_error
-                        .as_ref()
-                        .map_or(false, |le| le.is_app))) &&
-            path.active()
+
+        if self.should_send_ack_frame(pkt_type, epoch,
+            is_closing, left, now, send_pid, ack_elicit_required)
         {
+            let pkt_space = &mut self.pkt_num_spaces[epoch];
+
             let ack_delay = pkt_space.largest_rx_pkt_time.elapsed();
 
             let ack_delay = ack_delay.as_micros() as u64 /
