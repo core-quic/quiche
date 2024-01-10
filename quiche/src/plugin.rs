@@ -43,8 +43,18 @@ impl pluginop::api::ConnectionToPlugin for crate::Connection {
         todo!("find the right recovery")
     }
 
-    fn set_recovery(&mut self, _: RecoveryField, _: &[u8]) {
-        todo!("find the right recovery")
+    fn set_recovery(&mut self, field: RecoveryField, r: &[u8]) -> std::result::Result<(), CTPError> {
+        let pv: PluginVal = bincode::deserialize_from(r).map_err(|_| CTPError::SerializeError)?;
+        warn!("Assuming recovery of default active path");
+        if let Ok(p) = self.paths.get_active_mut() {
+            let recovery = &mut p.recovery;
+            match field {
+                RecoveryField::CongestionWindow =>
+                    recovery.congestion_window = pv.try_into().map_err(|_| CTPError::BadType)?,
+                    rf => todo!("cannot set recovery field yet: {rf:?}"),
+            };
+        }
+        Ok(())
     }
 
     fn get_connection(

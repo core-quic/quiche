@@ -135,7 +135,7 @@ pub struct Recovery {
     // Congestion control.
     cc_ops: &'static CongestionControlOps,
 
-    congestion_window: usize,
+    pub congestion_window: usize,
 
     bytes_in_flight: usize,
 
