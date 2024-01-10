@@ -38,7 +38,7 @@ use crate::packet;
 
 impl pluginop::api::ConnectionToPlugin for crate::Connection {
     fn get_recovery(
-        &self, _: &mut [u8], _: RecoveryField,
+        &self, _: RecoveryField, _: &mut [u8],
     ) -> bincode::Result<()> {
         todo!("find the right recovery")
     }
