@@ -139,7 +139,7 @@ pub struct Recovery {
 
     bytes_in_flight: usize,
 
-    ssthresh: usize,
+    pub ssthresh: usize,
 
     bytes_acked_sl: usize,
 

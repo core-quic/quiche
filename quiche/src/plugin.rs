@@ -51,7 +51,9 @@ impl pluginop::api::ConnectionToPlugin for crate::Connection {
             match field {
                 RecoveryField::CongestionWindow =>
                     recovery.congestion_window = pv.try_into().map_err(|_| CTPError::BadType)?,
-                    rf => todo!("cannot set recovery field yet: {rf:?}"),
+                RecoveryField::Ssthresh =>
+                    recovery.ssthresh = pv.try_into().map_err(|_| CTPError::BadType)?,
+                rf => todo!("cannot set recovery field yet: {rf:?}"),
             };
         }
         Ok(())
@@ -162,11 +164,11 @@ impl<CTP: ConnectionToPlugin> FromWithPH<frame::Frame, CTP> for PluginVal {
                     ecn_counts,
                     // TODO.
                     ack_ranges: Bytes {
-                        /// The tag to use to retrieve the associated data.
+                        // The tag to use to retrieve the associated data.
                         tag: 0,
-                        /// The maximum number of bytes that can be fetched.
+                        // The maximum number of bytes that can be fetched.
                         max_read_len: 0,
-                        /// The maximum number of bytes that can be written.
+                        // The maximum number of bytes that can be written.
                         max_write_len: 0,
                     },
                 })
