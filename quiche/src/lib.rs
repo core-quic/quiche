@@ -3156,8 +3156,10 @@ impl Connection {
     }
 
     #[pluginop(po = "PluginOp::ShouldSendFrame", value = "2")]
-    fn should_send_ack_frame(&mut self, pkt_type: packet::Type, epoch: packet::Epoch,
-        is_closing: bool, left: usize, now: time::Instant, send_pid: usize, ack_elicit_required: bool,
+    fn should_send_ack_frame(
+        &mut self, pkt_type: packet::Type, epoch: packet::Epoch,
+        is_closing: bool, left: usize, now: time::Instant, send_pid: usize,
+        ack_elicit_required: bool,
     ) -> bool {
         // A bit bad but still...
         let path = self.paths.get_mut(send_pid).unwrap();
@@ -3514,9 +3516,15 @@ impl Connection {
         // send a packet with PING anyways, even if we haven't received anything
         // ACK eliciting.
 
-        if self.should_send_ack_frame(pkt_type, epoch,
-            is_closing, left, now, send_pid, ack_elicit_required)
-        {
+        if self.should_send_ack_frame(
+            pkt_type,
+            epoch,
+            is_closing,
+            left,
+            now,
+            send_pid,
+            ack_elicit_required,
+        ) {
             let pkt_space = &mut self.pkt_num_spaces[epoch];
 
             let ack_delay = pkt_space.largest_rx_pkt_time.elapsed();

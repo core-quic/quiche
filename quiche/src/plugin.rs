@@ -43,16 +43,21 @@ impl pluginop::api::ConnectionToPlugin for crate::Connection {
         todo!("find the right recovery")
     }
 
-    fn set_recovery(&mut self, field: RecoveryField, r: &[u8]) -> std::result::Result<(), CTPError> {
-        let pv: PluginVal = bincode::deserialize_from(r).map_err(|_| CTPError::SerializeError)?;
+    fn set_recovery(
+        &mut self, field: RecoveryField, r: &[u8],
+    ) -> std::result::Result<(), CTPError> {
+        let pv: PluginVal =
+            bincode::deserialize_from(r).map_err(|_| CTPError::SerializeError)?;
         warn!("Assuming recovery of default active path");
         if let Ok(p) = self.paths.get_active_mut() {
             let recovery = &mut p.recovery;
             match field {
                 RecoveryField::CongestionWindow =>
-                    recovery.congestion_window = pv.try_into().map_err(|_| CTPError::BadType)?,
+                    recovery.congestion_window =
+                        pv.try_into().map_err(|_| CTPError::BadType)?,
                 RecoveryField::Ssthresh =>
-                    recovery.ssthresh = pv.try_into().map_err(|_| CTPError::BadType)?,
+                    recovery.ssthresh =
+                        pv.try_into().map_err(|_| CTPError::BadType)?,
                 rf => todo!("cannot set recovery field yet: {rf:?}"),
             };
         }
@@ -69,14 +74,17 @@ impl pluginop::api::ConnectionToPlugin for crate::Connection {
             ConnectionField::PacketNumberSpace(e, pns_field) => {
                 let pns = &self.pkt_num_spaces[packet::Epoch::from(e)];
                 match pns_field {
-                    quic::PacketNumberSpaceField::ReceivedPacketNeedAck => (pns.recv_pkt_need_ack.len() > 0).into(),
-                    quic::PacketNumberSpaceField::AckEllicited => pns.ack_elicited.into(),
+                    quic::PacketNumberSpaceField::ReceivedPacketNeedAck =>
+                        (pns.recv_pkt_need_ack.len() > 0).into(),
+                    quic::PacketNumberSpaceField::AckEllicited =>
+                        pns.ack_elicited.into(),
                     quic::PacketNumberSpaceField::NextPacketNumber => todo!(),
                     quic::PacketNumberSpaceField::HasSendKeys => todo!(),
                     quic::PacketNumberSpaceField::ShouldSend => todo!(),
-                    quic::PacketNumberSpaceField::LargestRxPacketNumber => todo!(),
+                    quic::PacketNumberSpaceField::LargestRxPacketNumber =>
+                        todo!(),
                 }
-            }
+            },
             f => todo!("{f:?}"),
         };
         bincode::serialize_into(w, &pv)
@@ -535,7 +543,8 @@ impl From<quic::KPacketNumberSpace> for packet::Epoch {
         match value {
             quic::KPacketNumberSpace::Initial => packet::Epoch::Initial,
             quic::KPacketNumberSpace::Handshake => packet::Epoch::Handshake,
-            quic::KPacketNumberSpace::ApplicationData => packet::Epoch::Application,
+            quic::KPacketNumberSpace::ApplicationData =>
+                packet::Epoch::Application,
         }
     }
 }
