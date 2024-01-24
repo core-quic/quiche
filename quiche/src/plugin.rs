@@ -37,9 +37,9 @@ use crate::frame;
 use crate::packet;
 
 impl pluginop::api::ConnectionToPlugin for crate::Connection {
-    fn get_recovery(
-        &self, _: RecoveryField, _: &mut [u8],
-    ) -> bincode::Result<()> {
+    fn get_recovery<'a>(
+        &self, _: RecoveryField, _: &'a mut [u8],
+    ) -> postcard::Result<&'a mut [u8]> {
         todo!("find the right recovery")
     }
 
@@ -47,7 +47,7 @@ impl pluginop::api::ConnectionToPlugin for crate::Connection {
         &mut self, field: RecoveryField, r: &[u8],
     ) -> std::result::Result<(), CTPError> {
         let pv: PluginVal =
-            bincode::deserialize_from(r).map_err(|_| CTPError::SerializeError)?;
+            postcard::from_bytes(r).map_err(|_| CTPError::SerializeError)?;
         warn!("Assuming recovery of default active path");
         if let Ok(p) = self.paths.get_active_mut() {
             let recovery = &mut p.recovery;
@@ -64,9 +64,9 @@ impl pluginop::api::ConnectionToPlugin for crate::Connection {
         Ok(())
     }
 
-    fn get_connection(
-        &self, field: ConnectionField, w: &mut [u8],
-    ) -> bincode::Result<()> {
+    fn get_connection<'a>(
+        &self, field: ConnectionField, w: &'a mut [u8],
+    ) -> postcard::Result<&'a mut [u8]> {
         let pv: PluginVal = match field {
             ConnectionField::MaxTxData => self.max_tx_data.into(),
             ConnectionField::IsEstablished => self.is_established().into(),
@@ -87,14 +87,14 @@ impl pluginop::api::ConnectionToPlugin for crate::Connection {
             },
             f => todo!("{f:?}"),
         };
-        bincode::serialize_into(w, &pv)
+        postcard::to_slice(&pv, w)
     }
 
     fn set_connection(
         &mut self, field: ConnectionField, r: &[u8],
     ) -> std::result::Result<(), CTPError> {
         let pv: PluginVal =
-            bincode::deserialize_from(r).map_err(|_| CTPError::SerializeError)?;
+            postcard::from_bytes(r).map_err(|_| CTPError::SerializeError)?;
         match field {
             ConnectionField::MaxTxData =>
                 self.max_tx_data = pv.try_into().map_err(|_| CTPError::BadType)?,

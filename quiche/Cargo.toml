@@ -67,7 +67,7 @@ sfv = { version = "0.9", optional = true }
 smallvec = { version = "1.10", features = ["serde", "union"] }
 pluginop = { path = "../../pluginop/lib" }
 octets = { package="pluginop-octets", path = "../../pluginop/octets" }
-bincode = "1"
+postcard = "1"
 
 [target."cfg(windows)".dependencies]
 winapi = { version = "0.3", features = ["wincrypt", "ws2def", "ws2ipdef", "ws2tcpip"] }
