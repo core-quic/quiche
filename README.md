@@ -1,6 +1,6 @@
 # Important note
 
-To build applications atop core-quiche, you probably want to use [core-quic](https://github.com/qdeconinck/core-quic) instead.
+To build applications atop core-quiche, you probably want to use [core-quic](https://github.com/core-quic/core-quic) instead.
 
 ![quiche](quiche.svg)
 
