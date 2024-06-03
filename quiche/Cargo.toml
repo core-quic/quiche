@@ -65,8 +65,8 @@ foreign-types-shared = { version = "0.3.0", optional = true }
 qlog = { version = "0.8", path = "../qlog", optional = true }
 sfv = { version = "0.9", optional = true }
 smallvec = { version = "1.10", features = ["serde", "union"] }
-pluginop = { path = "../../pluginop/lib" }
-octets = { package="pluginop-octets", path = "../../pluginop/octets" }
+pluginop = "0.1"
+octets = { package="pluginop-octets", version = "0.1" }
 postcard = "1"
 
 [target."cfg(windows)".dependencies]
